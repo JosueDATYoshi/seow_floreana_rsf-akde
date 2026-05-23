@@ -18,8 +18,8 @@ The analysis estimates which environmental features (vegetation, land use, topog
 Josue Arteaga-Torres — josue.arteaga.t@gmail.com
 
 
-AI disclaimer: Annotations and debugging of code was performed using Copilot POSIT asssitant tool from RStudio 2026.04.0+526 "Globemaster Allium" Release (57f8932a2d8c5a4a8c0d30ad918ec77f9f2dacaa, 2026-04-18) for windows
-Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) RStudio/2026.04.0+526 Chrome/142.0.7444.265 Electron/39.8.7 Safari/537.36, Quarto 1.9.36, Posit Assistant 0.3.2 
+**AI disclaimer:** Code annotations and debugging were assisted by the Posit Assistant tool (v0.3.2) in RStudio 2026.04.0+526 "Globemaster Allium" (2026-04-18) for Windows.
+
 ---
 
 <a href="https://example.com">Short-eared Owl RSF – Floreana</a> © Josue Arteaga-Torres is licensed under <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a><img src="https://mirrors.creativecommons.org/presskit/icons/cc.svg" alt="" style="max-width: 1em;max-height:1em;margin-left: .2em;"><img src="https://mirrors.creativecommons.org/presskit/icons/by.svg" alt="" style="max-width: 1em;max-height:1em;margin-left: .2em;">
@@ -102,7 +102,7 @@ Figures are saved to `outputs/figures/` in both PDF and TIFF (600 dpi, LZW) form
 | `future.apply` / `parallelly` | Parallel model fitting |
 | `sf`, `terra`, `raster` | Spatial vector and raster handling |
 | `tidyterra`, `ggnewscale`, `ggspatial` | ggplot2 extensions for spatial data |
-| `rnaturalearth` | Galápagos archipelago context map |
+
 | `ggplot2`, `patchwork`, `cowplot` | Figure composition |
 
 > `ctmm` is under active development. If the CRAN version is outdated, install from GitHub:
@@ -115,7 +115,10 @@ Figures are saved to `outputs/figures/` in both PDF and TIFF (600 dpi, LZW) form
 A fixed random seed (`set.seed(3847)`) ensures the Monte Carlo integrator in `rsf.fit()` produces identical results across runs. Model fitting is parallelised across up to 6 CPU cores via `future::plan("multisession")`.
 
 ---
-> sessionInfo()
+
+## Session Info
+
+```
 R version 4.5.3 RC (2026-03-03 r89528 ucrt)
 Platform: x86_64-w64-mingw32/x64
 Running under: Windows 11 x64 (build 26200)
@@ -157,4 +160,5 @@ loaded via a namespace (and not attached):
 [49] knitr_1.51          gridGraphics_0.5-1  rlang_1.1.7         Rcpp_1.1.1         
 [53] glue_1.8.0          DBI_1.3.0           rstudioapi_0.18.0   R6_2.6.1           
 [57] systemfonts_1.3.2   units_1.0-1  
+```
 
