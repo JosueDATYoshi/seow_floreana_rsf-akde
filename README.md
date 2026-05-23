@@ -28,17 +28,11 @@ Allium” (2026-04-18) for Windows.
 
 ------------------------------------------------------------------------
 
-\<\<\<\<\<\<\< HEAD
-<a href="https://github.com/JosueDATYoshi/seow_floreana_rsf-akde/tree/main">Short-eared
+<a href="https://github.com/JosueDATYoshi/seow_floreana_rsf-akde">Short-eared
 Owl RSF – Floreana Island, Galápagos</a> © 2026 by
 <a href="https://example.com">Josue D. Arteaga-Torres</a> is licensed
 under <a href="https://creativecommons.org/licenses/by/4.0/">CC BY
 4.0</a><img src="https://mirrors.creativecommons.org/presskit/icons/cc.svg" alt="" style="max-width: 1em;max-height:1em;margin-left: .2em;"><img src="https://mirrors.creativecommons.org/presskit/icons/by.svg" alt="" style="max-width: 1em;max-height:1em;margin-left: .2em;">
-======= <a href="https://example.com">Untitled</a> © 1999 by
-<a href="https://example.com">Jane Doe</a> is licensed under
-<a href="https://creativecommons.org/licenses/by/4.0/">CC BY
-4.0</a><img src="https://mirrors.creativecommons.org/presskit/icons/cc.svg" alt="" style="max-width: 1em;max-height:1em;margin-left: .2em;"><img src="https://mirrors.creativecommons.org/presskit/icons/by.svg" alt="" style="max-width: 1em;max-height:1em;margin-left: .2em;">
-\>\>\>\>\>\>\> 290c6a5fd58aec4da1c097ed1d56f05862c8a65c
 
 ## Analysis Workflow
 
