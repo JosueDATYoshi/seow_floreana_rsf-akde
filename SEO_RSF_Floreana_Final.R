@@ -1,9 +1,6 @@
 ###─────────────────────────────────────────────────────────────────────────###
 # Short-eared Owl RSF – Floreana Island, Galápagos ####
 #
-# 
-# 
-# 
 # Resource Selection Function (RSF) analysis of the Galápagos Short-eared Owl
 # (Asio flammeus galapagoensis) using continuous-time movement modelling (ctmm).
 # Analysis covers 16 individuals tracked on Floreana Island.
@@ -15,7 +12,7 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # SEC. 1  Packages
 # SEC. 2  System setup (working directory, seed, parallel workers)
-# SEC. 3  Data input (telemetry, rasters, shapefiles, results table)
+# SEC. 3  Data input (telemetry, rasters, land use, shapefiles, RSF labels)
 #
 # SEC. 4  Modelling
 #   4.1   Movement model selection  (ctmm.select)
@@ -50,26 +47,24 @@ library(ctmm)           # continuous-time movement modelling, AKDE, RSF
 library(future.apply)   # parallel model fitting via futures
 library(parallelly)     # query available CPU cores
 
-library(dplyr)          # data manipulation (filter, mutate, summarise)
-library(tidyr)          # data reshaping (pivot, nest)
-library(tibble)         # rownames_to_column and modern data frames
-library(readxl)         # read Excel files (.xlsx)
+library(dplyr)          # data manipulation
+library(tibble)         # rownames_to_column
+library(readxl)         # read Excel files
 
-library(sf)             # vector spatial data (shapefiles, polygons)
-library(terra)          # raster handling (modern replacement for raster pkg)
-library(raster)         # legacy raster format (still required by ctmm)
+library(sf)             # vector spatial data
+library(terra)          # raster handling
+library(raster)         # legacy raster format (required by ctmm)
 library(tidyterra)      # ggplot2 geoms for terra SpatRaster objects
 library(ggnewscale)     # multiple fill/colour scales in one ggplot
-library(scales)         # alpha() and other scale helpers
-library(ggspatial)      # scale bar and north arrow annotations for ggplot maps
-library(rnaturalearth)  # world/country outlines for context inset map
-library(rnaturalearthdata)
+library(scales)         # alpha() helper
+library(ggspatial)      # scale bar annotations for ggplot maps
 
-library(ggplot2)        # general plotting framework
-library(patchwork)      # compose multiple ggplot panels into one figure
-library(cowplot)        # plot_grid() for aligned mixed base-R / ggplot figures
-library(RColorBrewer)   # colour palettes for multi-individual maps
-library(here)           # stablishing the working directory directly file path
+library(ggplot2)        # plotting
+library(patchwork)      # compose ggplot panels
+library(cowplot)        # plot_grid() for mixed base-R / ggplot figures
+library(RColorBrewer)   # colour palettes
+library(here)           # project-relative file paths
+
 
 ###─────────────────────────────────────────────────────────────────────────###
 # SEC. 2 · SYSTEM SETUP ####
@@ -88,128 +83,109 @@ plan("multisession", workers = min(6, parallelly::availableCores()))
 # SEC. 3 · DATA INPUT ####
 ###─────────────────────────────────────────────────────────────────────────###
 
-# ── 3.1 Telemetry and movement data ####
-###─────────────────────────────────────────
+## 3.1 · Telemetry data ####
 
-# Pre-filtered list (PS0024 and PS0028 already excluded).
-# Run SEO_cleanup_publication.R once to generate this file.
-load("./outputs/publication/SEO_owls_pub.RData")  # -> owls_tele_pub, owls_move_pub
-
+load("./inputs/SEO_owls_data.RData")  # -> owls_tele
 x <- owls_tele
 
-# cat("Individuals in analysis:", paste(names(x), collapse = ", "), "\n")
-# cat("N individuals:", length(x), "\n")
+## 3.2 · Environmental rasters ####
+# Continuous raster layers (NDVI, TreeCover, Elevation, Slope, Ruggedness,
+# Urban, FarmLand, RoadProximity). Z-score before passing to rsf.fit().
 
-## ── 3.2 Environmental rasters ####
-###────────────────────────────────────────────────
-
-# z-scored continuous variables; categorical land-use layers combined into a
-# single factor raster. Standardisation preserves cross-variable comparability.
-owls_all_raster <- readRDS("./Rasters/SEO_standar_and_combined.rds")
-owls_env_list   <- unstack(owls_all_raster)
-names(owls_env_list) <- names(owls_all_raster)
-
-# Assign individual layer objects to the global environment for direct access
-for (nm in names(owls_all_raster)) assign(nm, owls_all_raster[[nm]])
-
-# Full raster list passed to RSF; Forest (LandUse class 1) is the reference
+load("./inputs/SEO_rasterlist_NDVI_tree_elev_slope_rug_urb_farm_road.RData")  # -> owls_env_list
 Rlist            <- owls_env_list
-categorical_list <- list(LandUse = 1)
+categorical_list <- list(LandUse = 1)  # Forest = reference category
 
-# ── 3.3 Spatial layers ####
-###───────────────────────────────────────────────────────
+## 3.3 · Land use raster ####
+# Rasterized from ecosystem polygons to the same 30 m UTM 15S grid.
+# Five classes: Forest (1, RSF reference), Lava (2), Low vegetation (3),
+# Urban (4), Lagoon (5). Ocean cells are NA (rendered as background in S.Fig. 2).
 
-# All spatial layers are pre-processed and stored in a single geopackage.
-# Run SEO_cleanup_publication.R once to generate this file.
-# Layers: galapagos (all islands, Floreana labelled), floreana_border, road
-gpkg_path <- "./outputs/publication/SEO_spatial_layers.gpkg"
+floreana_eco <- sf::st_read("./inputs/floreana_ecosystems.gpkg", quiet = TRUE) |>
+  sf::st_transform(32715) |>
+  dplyr::mutate(
+    lu_int = dplyr::case_when(
+      simplified_class %in% c("Deciduous Forest", "Evergreen Seasonal Forest",
+                               "Evergreen Shrub and Forest")              ~ 1L,
+      simplified_class == "Lava Field"                                    ~ 2L,
+      simplified_class %in% c("Deciduous Shrub", "Deciduous Grassland",
+                               "Invasive Plants", "Agriculture Buffer")   ~ 3L,
+      simplified_class %in% c("Agriculture", "Urban")                    ~ 4L,
+      simplified_class == "Water"                                         ~ 5L,
+      TRUE                                                                ~ 3L
+    )
+  )
 
-# Island outline in UTM Zone 15S (EPSG:32715); used for masking and plotting
-floreana <- sf::st_read(gpkg_path, layer = "floreana_border", quiet = TRUE)
+LandUse <- terra::rasterize(
+  terra::vect(floreana_eco),
+  terra::rast(owls_env_list[[1]]),
+  field = "lu_int"
+)
+levels(LandUse) <- data.frame(
+  value = 1:5,
+  class = c("Forest", "Lava", "Low vegetation", "Urban", "Lagoon")
+)
 
-# Main road centreline; already reprojected to UTM 15S
-road_sf <- sf::st_read(gpkg_path, layer = "road", quiet = TRUE)
+## 3.4 · Spatial layers ####
+# GeoPackage layers: floreana_border, road, galapagos (all islands)
 
-# Galápagos archipelago islands; UTM 15S, "Isla Santa María" already labelled
-# as "Floreana" for easy filtering.
-galapagos_islands <- sf::st_read(gpkg_path, layer = "galapagos", quiet = TRUE)
+gpkg_path         <- "./inputs/SEO_spatial_layers.gpkg"
+floreana          <- sf::st_read(gpkg_path, layer = "floreana_border", quiet = TRUE)
+road_sf           <- sf::st_read(gpkg_path, layer = "road",            quiet = TRUE)
+galapagos_islands <- sf::st_read(gpkg_path, layer = "galapagos",       quiet = TRUE)
+galapagos_flor    <- galapagos_islands |> dplyr::filter(NOMBRE == "Floreana")
 
-galapagos_flor <- galapagos_islands |>
-  dplyr::filter(NOMBRE == "Floreana")
-galapagos_rest <- galapagos_islands |>
-  dplyr::filter(is.na(NOMBRE) | NOMBRE != "Floreana")
+## 3.5 · RSF variable labels ####
+# Maps ctmm's internal row names to readable labels used in figures
+
+rsf_long <- read_excel("./outputs/RSF_results_final_long.xlsx", sheet = "Sheet1")
+
 
 ###─────────────────────────────────────────────────────────────────────────###
 # SEC. 4 · MODELLING ####
 ###─────────────────────────────────────────────────────────────────────────###
 
-###─────────────────────────────────────────────────────────────────────────###
 ## 4.1 · Movement model selection (ctmm.select) ####
-###─────────────────────────────────────────────────────────────────────────###
-#
-# AICc-based selection across candidate continuous-time movement models
-# (OUF, OU, IID, and anisotropic variants). isotropic = TRUE constrains the
-# home range to a circular covariance structure, appropriate for these owls.
+# AICc-based selection across OUF, OU, IID, and anisotropic variants.
+# isotropic = TRUE constrains the home range to a circular covariance structure.
 
-# guess <- lapply(x, ctmm.guess,
-#                 CTMM        = ctmm(isotropic = TRUE),
-#                 interactive = FALSE)
-#
-# ctmm_fit <- future_mapply(ctmm.select, x, guess,
-#                            SIMPLIFY    = FALSE,
-#                            future.seed = TRUE)
-#
-# save(ctmm_fit, file = "./outputs/models/ctmm_select_Final.RData")
+# guess    <- lapply(x, ctmm.guess, CTMM = ctmm(isotropic = TRUE), interactive = FALSE)
+# ctmm_fit <- future_mapply(ctmm.select, x, guess, SIMPLIFY = FALSE, future.seed = TRUE)
+# save(ctmm_fit, file = "./outputs/ctmm_select_Final.RData")
 
-load("./outputs/models/ctmm_select_Final.RData")   # loads object named 'ctmm'
-ctmm_fit <- ctmm; rm(ctmm)   # rename to avoid masking the ctmm() function
+load("./outputs/ctmm_select_Final.RData")
+ctmm_fit <- ctmm; rm(ctmm)
 
-###─────────────────────────────────────────────────────────────────────────###
-## 4.2 · Autocorrelated Kernel Density Estimate (AKDE) ####
-###─────────────────────────────────────────────────────────────────────────###
-#
-# A shared grid aligned to Rlist[[1]] ensures all AKDE outputs and
-# environmental rasters share the same spatial extent and resolution,
-# which is required for RSF estimation.
+## 4.2 · Autocorrelated KDE (AKDE) ####
+# Shared grid aligned to Rlist[[1]] ensures AKDE and raster extents match.
 
 # akde_fit <- akde(x, ctmm_fit, grid = Rlist[[1]])
-# save(akde_fit, file = "./outputs/AKDEs/AKDE_Final.RData")
+# save(akde_fit, file = "./outputs/AKDE_Final.RData")
 
-load("./outputs/AKDEs/AKDE_Final.RData")   # loads object named 'akde'
+load("./outputs/AKDE_Final.RData")
 akde_fit <- akde; rm(akde)
 
-###─────────────────────────────────────────────────────────────────────────###
 ## 4.3 · Resource Selection Function (rsf.fit) ####
-###─────────────────────────────────────────────────────────────────────────###
-#
-# Monte Carlo integrator is recommended for complex, real-world raster
-# landscapes. reference = categorical_list sets Forest as the baseline level
-# for the LandUse factor (all other classes are estimated relative to Forest).
+# Monte Carlo integrator for complex real-world raster landscapes.
 
 # rsf_fit <- future_mapply(rsf.fit, x, akde_fit,
-#                           MoreArgs    = list(R          = Rlist,
-#                                              integrator = "MonteCarlo",
-#                                              reference  = categorical_list),
-#                           SIMPLIFY    = FALSE,
-#                           future.seed = TRUE)
-#
-# save(rsf_fit, file = "./outputs/RSFs/RSF_Final_06.24.RData")
+#                          MoreArgs    = list(R          = Rlist,
+#                                             integrator = "MonteCarlo",
+#                                             reference  = categorical_list),
+#                          SIMPLIFY    = FALSE,
+#                          future.seed = TRUE)
+# save(rsf_fit, file = "./outputs/RSF_Final.RData")
 
-load("./outputs/RSFs/RSF_Final_06.24.RData")   # loads object named 'rsf'
+load("./outputs/RSF_Final.RData")
 rsf_fit <- rsf; rm(rsf)
 
-###─────────────────────────────────────────────────────────────────────────###
 ## 4.4 · RSF-informed AKDE (AKDE+RSF) ####
-###─────────────────────────────────────────────────────────────────────────###
-#
-# Incorporates estimated habitat selection coefficients into the utilisation
-# distribution, producing a home range that reflects both movement autocorrelation
-# and resource preferences. This is the primary output used in home range maps.
+# Incorporates habitat selection coefficients into the utilisation distribution.
 
 # akde_rsf_fit <- akde(x, CTMM = rsf_fit, R = Rlist, grid = Rlist[[1]])
-# save(akde_rsf_fit, file = "./outputs/AKDE+RSF/AKDERSF_Final_06.24.RData")
+# save(akde_rsf_fit, file = "./outputs/AKDERSF_Final.RData")
 
-load("./outputs/AKDE+RSF/AKDERSF_Final_06.24.RData")   # loads 'akde_rsf'
+load("./outputs/AKDERSF_Final.RData")
 akde_rsf_fit <- akde_rsf; rm(akde_rsf)
 
 
@@ -217,26 +193,16 @@ akde_rsf_fit <- akde_rsf; rm(akde_rsf)
 # SEC. 5 · SUMMARY TABLES ####
 ###─────────────────────────────────────────────────────────────────────────###
 
-###─────────────────────────────────────────────────────────────────────────###
 ## 5.1 · Population-level RSF coefficients ####
-###─────────────────────────────────────────────────────────────────────────###
-#' Calculation of population-level rsf
-# mean_rsf <- mean(rsf)
 
-# save(mean_rsf, file = here::here("outputs", "/Mean_Population_RSF_Final.RData"))
+load("./outputs/Mean_Population_RSF_Final.RData")  # -> mean_rsf
 
-load("./outputs/Mean_Population_RSF_Final.RData")   # -> mean_rsf
-
-mean_rsf_summary <- summary(mean_rsf)
-
-# CI matrix: rows = model parameters (RSF + movement); columns = low, est, high
-ci_raw <- as.data.frame(mean_rsf_summary$CI)
+ci_raw <- as.data.frame(summary(mean_rsf)$CI)
 colnames(ci_raw)[1:3] <- c("low", "estimate", "high")
 
-# Retain only RSF variable rows (skip movement and autocorrelation parameters)
+# Rows corresponding to RSF variables (skips movement/autocorrelation parameters)
 ci_df <- ci_raw[c(1, 3, 4, 6, 8, 10:11, 13, 15, 17), ]
 
-# Assign human-readable labels (reference category Forest excluded from table)
 pop_var_labels <- c(
   "Land Type-Ocean", "Land Type-Urban", "Land Type-Low vegetation",
   "Land Type-Lava",  "Distance to Road", "Ruggedness Index",
@@ -246,19 +212,7 @@ pop_var_labels <- c(
 rownames(ci_df) <- pop_var_labels
 ci_df$term      <- pop_var_labels
 
-# write.csv(ci_df, "./outputs/RSF_pop_final.csv", row.names = TRUE)
-
-# ── 3.4 Pre-processed RSF variable name table ####
-###────────────────────────────────
-
-# Long-format table of RSF variable labels harmonised across individuals
-# (used to replace ctmm's internal row names with readable names)
-rsf_long <- read_excel("./outputs/RSF_results_final_long.xlsx", sheet = "Sheet1")
-
-
-###─────────────────────────────────────────────────────────────────────────###
 ## 5.2 · Individual-level RSF coefficients ####
-###─────────────────────────────────────────────────────────────────────────###
 
 rsf_variables <- c("NDVI", "TreeCover", "Elevation", "Slope",
                    "Ruggedness", "RoadProximity", "LandUse")
@@ -269,17 +223,10 @@ result_ind <- do.call(rbind, lapply(rsf_fit, function(fit) {
   tibble::rownames_to_column(df, var = "variable")
 }))
 result_ind$animal_id <- rep(names(x), each = 11)
+result_ind$variable  <- rsf_long$Variable
 
-# Replace ctmm's internal parameter names with readable variable labels
-result_ind$variable <- rsf_long$Variable
-
-# write.csv(result_ind, "./outputs/RSF_Results_MC_Final.csv", row.names = FALSE)
-
-###─────────────────────────────────────────────────────────────────────────###
 ## 5.3 · Combined data frame (individuals + population) ####
-###─────────────────────────────────────────────────────────────────────────###
 
-# Mapping from raw labels to harmonised display names used across all figures
 name_map <- c(
   "Lava Field"     = "Land Type-Lava",
   "Ocean"          = "Land Type-Ocean",
@@ -296,8 +243,8 @@ result_ind <- result_ind |>
 ci_df <- ci_df |>
   dplyr::mutate(term = dplyr::recode(term, !!!name_map, .default = term))
 
-# Population-based CI caps prevent extreme individual estimates from distorting
-# axis scales (individual cap = population estimate ± 5 × population CI width)
+# CI caps prevent extreme individual estimates from distorting axis scales
+# (cap = population estimate ± 5 × population CI width)
 cap_table <- ci_df |>
   dplyr::mutate(
     ci_width = high - low,
@@ -324,7 +271,6 @@ pop_df <- ci_df |>
 plot_df <- dplyr::bind_rows(ind_df, pop_df) |>
   dplyr::left_join(cap_table, by = "term") |>
   dplyr::mutate(
-    # Flag values that were clipped to the population-derived cap
     truncated = (low < cap_low | high > cap_high |
                    estimate < cap_low | estimate > cap_high),
     low       = pmax(low,      cap_low,  na.rm = TRUE),
@@ -342,11 +288,7 @@ plot_df <- dplyr::bind_rows(ind_df, pop_df) |>
 # SEC. 6 · FIGURES ####
 ###─────────────────────────────────────────────────────────────────────────###
 
-# Shared significance colour palette (Okabe-Ito; well-separated luminance
-# values ensure the three categories remain distinguishable in greyscale):
-#   Positive:        sky blue   #56B4E9  (luminance ≈ 0.42)
-#   Negative:        vermillion #D55E00  (luminance ≈ 0.23)
-#   Non-significant: gray80              (luminance ≈ 0.60)
+# Shared significance colour palette (Okabe-Ito)
 sig_colors <- c(
   "Positive"        = "#56B4E9",
   "Negative"        = "#D55E00",
@@ -358,15 +300,6 @@ src_shapes <- c("Individual" = 16, "Population" = 18)
 ###─────────────────────────────────────────────────────────────────────────###
 ## Fig. 1 · RSF forest plot: 3 × 3 individual + population grid ####
 ###─────────────────────────────────────────────────────────────────────────###
-#
-# Layout (row × column):
-#   Row 1 – Vegetation Index | Tree Cover   | Low Vegetation
-#   Row 2 – Distance to Road | Urban        | Lava
-#   Row 3 – Elevation        | Ruggedness   | Slope
-#
-# Within each panel: circles = individual estimates; diamonds = population mean.
-# Faded points/bars indicate values clipped by the population-based axis cap.
-# Ocean and Fresh Water omitted (not retained in final model).
 
 plot_df_fig1 <- plot_df |>
   dplyr::filter(!term %in% c("Land Type-Fresh Water", "Land Type-Ocean"))
@@ -389,7 +322,6 @@ var_labels_fig1 <- c(
   "Slope Angle"              = "Slope Angle"
 )
 
-# Helper function: produce one forest panel per environmental variable
 make_panel_fig1 <- function(vname, df) {
   sub <- df |> dplyr::filter(term == vname)
   ggplot(sub, aes(x = estimate, y = animal_id)) +
@@ -401,7 +333,7 @@ make_panel_fig1 <- function(vname, df) {
     geom_errorbarh(
       data = \(d) dplyr::filter(d, source == "Individual"),
       aes(xmin = low, xmax = high, color = significance, alpha = truncated),
-      height = 0.2
+      width = 0.2
     ) +
     geom_point(
       data = \(d) dplyr::filter(d, source == "Population"),
@@ -411,7 +343,7 @@ make_panel_fig1 <- function(vname, df) {
     geom_errorbarh(
       data = \(d) dplyr::filter(d, source == "Population"),
       aes(xmin = low, xmax = high, color = significance),
-      linewidth = 1.2, height = 0.3
+      linewidth = 1.2, width = 0.3
     ) +
     geom_vline(xintercept = 0, linetype = "dashed", color = "gray60") +
     scale_color_manual(
@@ -421,10 +353,7 @@ make_panel_fig1 <- function(vname, df) {
       guide  = "none"
     ) +
     scale_shape_manual(values = src_shapes, guide = "none") +
-    scale_alpha_manual(
-      values = c(`TRUE` = 0.35, `FALSE` = 1),
-      guide  = "none"
-    ) +
+    scale_alpha_manual(values = c(`TRUE` = 0.35, `FALSE` = 1), guide = "none") +
     labs(x = NULL, y = NULL, title = var_labels_fig1[vname]) +
     theme_minimal(base_size = 9) +
     theme(
@@ -445,98 +374,32 @@ fig1 <- wrap_plots(
 
 fig1
 
-# ggsave("./outputs/figures/Fig1_RSF_3x3.pdf",  fig1, width = 10, height = 10)
-# ggsave("./outputs/figures/Fig1_RSF_3x3.tiff", fig1, width = 10, height = 10,
-#         dpi = 600, compression = "lzw")
+ggsave("./outputs/figures/Fig1_RSF_3x3.pdf",  fig1, width = 10, height = 10)
+ggsave("./outputs/figures/Fig1_RSF_3x3.tiff", fig1, width = 10, height = 10,
+        dpi = 600, compression = "lzw")
 
 
 ###─────────────────────────────────────────────────────────────────────────###
 ## Fig. 2 · Home range meta-analysis (A) + AKDE+RSF spatial map (B) ####
 ###─────────────────────────────────────────────────────────────────────────###
 
-# ── Individual colour palette (shared between Panels A and B) ────────────────
-# Draws from Set1 + Dark2; red removed and the 5th colour muted to avoid
-# confusion with the significance palette used in Fig. 1.
-pal_ind <- c(
-  RColorBrewer::brewer.pal(name = "Set1",  n = 9),
-  RColorBrewer::brewer.pal(name = "Dark2", n = 8)
-)
-pal_ind <- pal_ind[-3]        # remove red
-pal_ind[5] <- "#888866"       # mute clashing 5th colour
-
-# Assign palette colours to individual IDs in the same order as ctmm's colouring
-pal <- ctmm::color(akde_rsf_fit, by = "individual")
-for (i in seq_along(pal)) pal[i] <- pal_ind[i]
-
+# Individual colour palette (shared between Panels A and B)
+# Draws from Set1 + Dark2; red removed and 5th colour muted
+pal_ind    <- c(RColorBrewer::brewer.pal(9, "Set1"), RColorBrewer::brewer.pal(8, "Dark2"))
+pal_ind    <- pal_ind[-3]
+pal_ind[5] <- "#888866"
 ind_colors <- setNames(pal_ind[seq_along(akde_rsf_fit)], names(akde_rsf_fit))
 
-###─────────────────────────────────────────────────────────────────────────###
-### Fig. 2A · Home range size meta-analysis ####
-###─────────────────────────────────────────────────────────────────────────###
-#
-# ctmm::meta() ranks individuals by home range size (with uncertainty) and
-# overlays the population mean (black diamond). Wrapped with wrap_elements()
-# so patchwork can compose it alongside the ggplot map.
-
-fig2a <- wrap_elements(full = ~ ctmm::meta(
-  akde_rsf_fit,
-  col     = c(pal, "black"),
-  verbose = FALSE,
-  sort    = TRUE,
-  labels  = TRUE
-))
-
-###─────────────────────────────────────────────────────────────────────────###
-### Fig. 2B · AKDE+RSF spatial map with inset ####
-###─────────────────────────────────────────────────────────────────────────###
-#
-# Layers (bottom to top):
-#   1. Floreana island outline (light grey fill)
-#   2. Per-individual continuous UD gradient clipped to 95% HR boundary:
-#      core (UD ≈ 0, most used) near-opaque; edge (UD ≈ 0.95) transparent.
-#      Visual style mirrors ctmm::plot(akde_rsf).
-#   3. Main road in fixed grey (described in figure caption; no legend entry).
-#   4. Scale bar (bottom-left).
-# Inset: all Galápagos islands in uniform grey; Floreana study area marked
-#   with an orange bounding-box rectangle (no contrasting island colour).
-
-# ── Continuous UD rasters ────────────────────────────────────────────────────
-# ctmm stores UD as p-values: 0 = most intensely used, 1 = outside HR.
+# UD rasters clipped to 95% HR boundary (ctmm stores UD as p-values: 0 = core)
 akde_ud_list <- lapply(akde_rsf_fit, function(ud) {
-  r        <- raster::raster(ud)
-  r[r > 0.95] <- NA    # mask cells beyond the 95% contour
+  r           <- raster::raster(ud)
+  r[r > 0.95] <- NA
   terra::rast(r)
 })
 
-# One geom_spatraster block per individual.
-# NOTE: ggnewscale layers cannot be reused across ggplot() calls; always
-#   build fresh with this mapply() pattern.
-ind_overlay_layers <- unlist(
-  mapply(function(r, col) {
-    list(
-      new_scale_fill(),
-      geom_spatraster(data = r),
-      scale_fill_gradient(
-        low      = scales::alpha(col, 0.9),
-        high     = scales::alpha(col, 0.05),
-        na.value = NA,
-        guide    = "none"
-      )
-    )
-  },
-  akde_ud_list,
-  ind_colors[names(akde_rsf_fit)],
-  SIMPLIFY = FALSE),
-  recursive = FALSE
-)
-
-# ── Galápagos context inset ───────────────────────────────────────────────────
-# All islands in uniform grey. An orange bounding-box rectangle locates
-# Floreana without singling out its polygon colour.
-# Expand Floreana's bounding box by 15 km on each side so the indicator
-# rectangle is clearly visible at the full-archipelago inset scale.
+# Galápagos context inset: uniform grey islands, orange bbox marks Floreana
 flor_bb <- sf::st_bbox(galapagos_flor)
-pad     <- 15000   # metres (UTM 15S)
+pad     <- 15000  # 15 km padding in UTM 15S metres
 floreana_bbox_sf <- sf::st_as_sfc(
   structure(
     c(xmin = unname(flor_bb["xmin"]) - pad,
@@ -549,28 +412,12 @@ floreana_bbox_sf <- sf::st_as_sfc(
 )
 
 fig2b_inset <- ggplot() +
-  geom_sf(
-    data      = galapagos_islands,
-    fill      = "gray75",
-    color     = "gray40",
-    linewidth = 0.2
-  ) +
-  geom_sf(
-    data      = floreana_bbox_sf,
-    fill      = NA,
-    color     = "#D55E00",
-    linewidth = 0.8
-  ) +
+  geom_sf(data = galapagos_islands, fill = "gray75", color = "gray40", linewidth = 0.2) +
+  geom_sf(data = floreana_bbox_sf,  fill = NA, color = "#D55E00", linewidth = 0.8) +
   theme_void() +
-  theme(
-    panel.border = element_rect(color = "gray30", fill = NA, linewidth = 0.5)
-  )
+  theme(panel.border = element_rect(color = "gray30", fill = NA, linewidth = 0.5))
 
-# ── Main map (Panel B) ───────────────────────────────────────────────────────
-# No tag added here — labels are handled by cowplot::plot_grid() below,
-# which converts both panels to grobs and guarantees left-edge alignment.
-# NOTE: ind_overlay_layers must be rebuilt fresh for each ggplot() call;
-#   ggnewscale layers are stateful and cannot be reused across calls.
+# ggnewscale layers are stateful and must be rebuilt fresh for each ggplot() call
 ind_overlay_layers <- unlist(
   mapply(function(r, col) {
     list(
@@ -584,8 +431,7 @@ ind_overlay_layers <- unlist(
       )
     )
   },
-  akde_ud_list,
-  ind_colors[names(akde_rsf_fit)],
+  akde_ud_list, ind_colors[names(akde_rsf_fit)],
   SIMPLIFY = FALSE),
   recursive = FALSE
 )
@@ -604,24 +450,11 @@ fig2b_main <- ggplot() +
   )
 
 fig2b <- fig2b_main +
-  inset_element(
-    fig2b_inset,
-    left = 0.65, bottom = 0.65,
-    right = 1.00, top   = 1.00
-  )
+  inset_element(fig2b_inset, left = 0.65, bottom = 0.65, right = 1.00, top = 1.00)
 
-# ── Compose Fig. 2: Panel A over Panel B ────────────────────────────────────
-# cowplot::plot_grid() converts both elements to grobs before laying them out,
-# so the outer left/right edges of A and B are guaranteed to be flush.
-# rel_heights = c(1, 1.25) gives the requested proportional area split.
 fig2 <- cowplot::plot_grid(
-  ~ ctmm::meta(
-      akde_rsf_fit,
-      col     = c(pal, "black"),
-      verbose = FALSE,
-      sort    = TRUE,
-      labels  = TRUE
-    ),
+  ~ ctmm::meta(akde_rsf_fit, col = c(ind_colors, "black"),
+               verbose = FALSE, sort = TRUE, labels = TRUE),
   fig2b,
   ncol           = 1,
   rel_heights    = c(1, 1.25),
@@ -632,18 +465,14 @@ fig2 <- cowplot::plot_grid(
 
 fig2
 
-# ggsave("./outputs/figures/Fig2_HomeRange_Map.pdf",  fig2, width = 8, height = 14)
-# ggsave("./outputs/figures/Fig2_HomeRange_Map.tiff", fig2, width = 8, height = 14,
-#         dpi = 600, compression = "lzw")
+ggsave("./outputs/figures/Fig2_HomeRange_Map.pdf",  fig2, width = 8, height = 14)
+ggsave("./outputs/figures/Fig2_HomeRange_Map.tiff", fig2, width = 8, height = 14,
+        dpi = 600, compression = "lzw")
 
 
 ###─────────────────────────────────────────────────────────────────────────###
 ## S.Fig. 1 · Population-level RSF: all variables, sorted by estimate ####
 ###─────────────────────────────────────────────────────────────────────────###
-#
-# Full population-level (meta-analysis mean) forest plot for supplementary
-# material. Ocean dropped (no meaningful habitat use); remaining variables
-# sorted from most negative to most positive selection coefficient.
 
 sfig1_df <- ci_df |>
   dplyr::filter(term != "Land Type-Ocean") |>
@@ -655,16 +484,9 @@ sfig1_df <- ci_df |>
     )
   )
 
-sfig1 <- ggplot(
-  sfig1_df,
-  aes(x = estimate, y = reorder(term, estimate), color = significance)
-) +
+sfig1 <- ggplot(sfig1_df, aes(x = estimate, y = reorder(term, estimate), color = significance)) +
   geom_vline(xintercept = 0, linetype = "dashed", color = "gray60") +
-  geom_errorbarh(
-    aes(xmin = low, xmax = high),
-    height    = 0.25,
-    linewidth = 0.8
-  ) +
+  geom_errorbarh(aes(xmin = low, xmax = high), width = 0.25, linewidth = 0.8) +
   geom_point(shape = 18, size = 4) +
   scale_color_manual(
     values = sig_colors,
@@ -672,10 +494,7 @@ sfig1 <- ggplot(
     name   = "Effect",
     drop   = FALSE
   ) +
-  labs(
-    x = "RSF Coefficient Estimate",
-    y = NULL
-  ) +
+  labs(x = "RSF Coefficient Estimate", y = NULL) +
   theme_minimal(base_size = 11) +
   theme(
     legend.position = "right",
@@ -684,37 +503,27 @@ sfig1 <- ggplot(
 
 sfig1
 
-# ggsave("./outputs/figures/SFig1_PopRSF.pdf",  sfig1, width = 7, height = 5)
-# ggsave("./outputs/figures/SFig1_PopRSF.tiff", sfig1, width = 7, height = 5,
-#         dpi = 600, compression = "lzw")
+ggsave("./outputs/figures/SFig1_PopRSF.pdf",  sfig1, width = 7, height = 5)
+ggsave("./outputs/figures/SFig1_PopRSF.tiff", sfig1, width = 7, height = 5,
+        dpi = 600, compression = "lzw")
 
 
 ###─────────────────────────────────────────────────────────────────────────###
 ## S.Fig. 2 · Land use + road + AKDE overlap map ####
 ###─────────────────────────────────────────────────────────────────────────###
-#
-# Base layer: Floreana land-use raster (Okabe-Ito colours).
-# Overlay: per-individual 95% HR rasters stacked with α = 0.25 (dark grey);
-#   darker cells indicate higher spatial overlap among individuals.
-# Road centreline in white for contrast against the coloured base.
-# Galápagos context inset (same as Fig. 2) and scale bar added.
 
-lu_terra <- terra::rast(LandUse)
-levels(lu_terra)[[1]]$class[4] <- "Urban"
-levels(lu_terra)[[1]]$class[5] <- "Lagoon"
+lu_terra <- LandUse
 
 landuse_cols <- c(
-  "Forest"         = "#009E73",  # Okabe-Ito bluish green
-  "Lava"           = "#999999",  # grey
-  "Low vegetation" = "#F0E442",  # yellow
-  "Urban"          = "#E69F00",  # amber
-  "Lagoon"         = "#56B4E9",  # sky blue
-  "Ocean"          = "#0072B2"   # blue
+  "Forest"         = "#009E73",
+  "Lava"           = "#999999",
+  "Low vegetation" = "#F0E442",
+  "Urban"          = "#E69F00",
+  "Lagoon"         = "#56B4E9",
+  "Ocean"          = "#0072B2"
 )
 
-layer_alpha <- 0.25   # per-layer opacity; compounding reveals overlap intensity
-
-# Binary 95% HR rasters (1 = inside UD, NA = outside / transparent)
+# Binary 95% HR rasters (1 = inside UD, NA = outside)
 akde_bin_sfig2 <- lapply(akde_rsf_fit, function(ud) {
   r     <- raster::raster(ud)
   r_bin <- r <= 0.95
@@ -722,32 +531,24 @@ akde_bin_sfig2 <- lapply(akde_rsf_fit, function(ud) {
   terra::rast(r_bin)
 })
 
-# Stack one dark-grey geom per individual; opacity compounds naturally.
-# NOTE: ggnewscale layers cannot be reused across separate ggplot() calls;
-# these layers are built fresh here (not shared with Fig. 2B).
+# Per-individual dark-grey overlay; α = 0.25 compounds to reveal overlap intensity
 overlap_layers_sfig2 <- unlist(lapply(akde_bin_sfig2, function(r) {
   list(
     new_scale_fill(),
     geom_spatraster(data = r),
     scale_fill_gradient(
       low      = scales::alpha("#1A1A1A", 0),
-      high     = scales::alpha("#1A1A1A", layer_alpha),
+      high     = scales::alpha("#1A1A1A", 0.25),
       na.value = NA,
       guide    = "none"
     )
   )
 }), recursive = FALSE)
 
-# Main map
-# Road plotted with fixed colour (described in caption; no legend entry).
-# fig2b_inset reused from Fig. 2 — same bbox-rectangle style, uniform grey islands.
 sfig2_main <- ggplot() +
-  # Land use base layer
   geom_spatraster(data = lu_terra, aes(fill = class)) +
   scale_fill_manual(values = landuse_cols, name = "Land Use", na.value = NA) +
-  # AKDE overlap overlay
   overlap_layers_sfig2 +
-  # Road — fixed white colour; described in caption, no legend entry
   geom_sf(data = road_sf, color = "white", linewidth = 0.66, inherit.aes = FALSE) +
   annotation_scale(location = "br", width_hint = 0.25) +
   coord_sf(crs = 32715, expand = FALSE) +
@@ -758,20 +559,14 @@ sfig2_main <- ggplot() +
     legend.position  = "right",
     legend.title     = element_text(size = 9, face = "bold"),
     legend.text      = element_text(size = 8),
-    # Ocean cells outside the island are filled with the ocean colour
     panel.background = element_rect(fill = "#0072B2", color = NA)
   )
 
-# Embed the same Galápagos inset used in Fig. 2 (bbox rectangle, uniform grey)
 sfig2 <- sfig2_main +
-  inset_element(
-    fig2b_inset,
-    left = 0.65, bottom = 0.65,
-    right = 1.00, top   = 1.00
-  )
+  inset_element(fig2b_inset, left = 0.65, bottom = 0.65, right = 1.00, top = 1.00)
 
 sfig2
 
-# ggsave("./outputs/figures/SFig2_LandUse_AKDE.pdf",  sfig2, width = 8, height = 7)
-# ggsave("./outputs/figures/SFig2_LandUse_AKDE.tiff", sfig2, width = 8, height = 7,
-#         dpi = 600, compression = "lzw")
+ggsave("./outputs/figures/SFig2_LandUse_AKDE.pdf",  sfig2, width = 8, height = 7)
+ggsave("./outputs/figures/SFig2_LandUse_AKDE.tiff", sfig2, width = 8, height = 7,
+        dpi = 600, compression = "lzw")
