@@ -5,34 +5,10 @@
 # (Asio flammeus galapagoensis) using continuous-time movement modelling (ctmm).
 # Analysis covers 16 individuals tracked on Floreana Island.
 #
-# Josue Arteaga-Torres 
-###─────────────────────────────────────────────────────────────────────────###
-#
-# SCRIPT INDEX
-# ─────────────────────────────────────────────────────────────────────────────
-# SEC. 1  Packages
-# SEC. 2  System setup (working directory, seed, parallel workers)
-# SEC. 3  Data input (telemetry, rasters, land use, shapefiles, RSF labels)
-#
-# SEC. 4  Modelling
-#   4.1   Movement model selection  (ctmm.select)
-#   4.2   Autocorrelated KDE        (AKDE)
-#   4.3   Resource Selection Function (rsf.fit)
-#   4.4   RSF-informed AKDE         (AKDE+RSF)
-#
-# SEC. 5  Summary tables
-#   5.1   Population-level RSF coefficients
-#   5.2   Individual-level RSF coefficients
-#   5.3   Combined data frame for figures
-#
-# SEC. 6  Figures
-#   Fig. 1    3×3 RSF forest plot (individuals + population)
-#   Fig. 2    Panel A – Range distribution meta-analysis (ctmm::meta)
-#             Panel B – AKDE+RSF spatial map, scale bar, Galápagos inset
-#   S.Fig. 1  Population-level RSF forest plot (all variables, sorted)
-#   S.Fig. 2  Land use + road + AKDE overlap map
-# ─────────────────────────────────────────────────────────────────────────────
-
+# Code Author: Josue Arteaga-Torres 
+# Research authors: Josué D. Arteaga-Torres, Shane C. Sumasgutner, 
+# Paula A. Castaño, Sonia Kleindorfer, Petra Sumasgutner
+# 
 
 ###─────────────────────────────────────────────────────────────────────────###
 # SEC. 1 · PACKAGES ####
@@ -49,7 +25,6 @@ library(parallelly)     # query available CPU cores
 
 library(dplyr)          # data manipulation
 library(tibble)         # rownames_to_column
-library(readxl)         # read Excel files
 
 library(sf)             # vector spatial data
 library(terra)          # raster handling
@@ -109,8 +84,9 @@ floreana_eco <- sf::st_read("./inputs/floreana_ecosystems.gpkg", quiet = TRUE) |
                                "Evergreen Shrub and Forest")              ~ 1L,
       simplified_class == "Lava Field"                                    ~ 2L,
       simplified_class %in% c("Deciduous Shrub", "Deciduous Grassland",
-                               "Invasive Plants", "Agriculture Buffer")   ~ 3L,
-      simplified_class %in% c("Agriculture", "Urban")                    ~ 4L,
+                               "Invasive Plants", "Agriculture", 
+                              "Agriculture Buffer")                       ~ 3L,
+      simplified_class == "Urban"                                         ~ 4L,
       simplified_class == "Water"                                         ~ 5L,
       TRUE                                                                ~ 3L
     )
@@ -121,9 +97,10 @@ LandUse <- terra::rasterize(
   terra::rast(owls_env_list[[1]]),
   field = "lu_int"
 )
+LandUse[is.na(LandUse)] <- 6L
 levels(LandUse) <- data.frame(
-  value = 1:5,
-  class = c("Forest", "Lava", "Low vegetation", "Urban", "Lagoon")
+  value = 1:6,
+  class = c("Forest", "Lava", "Low vegetation", "Urban", "Lagoon", "Ocean")
 )
 
 ## 3.4 · Spatial layers ####
@@ -134,11 +111,6 @@ floreana          <- sf::st_read(gpkg_path, layer = "floreana_border", quiet = T
 road_sf           <- sf::st_read(gpkg_path, layer = "road",            quiet = TRUE)
 galapagos_islands <- sf::st_read(gpkg_path, layer = "galapagos",       quiet = TRUE)
 galapagos_flor    <- galapagos_islands |> dplyr::filter(NOMBRE == "Floreana")
-
-## 3.5 · RSF variable labels ####
-# Maps ctmm's internal row names to readable labels used in figures
-
-rsf_long <- read_excel("./outputs/RSF_results_final_long.xlsx", sheet = "Sheet1")
 
 
 ###─────────────────────────────────────────────────────────────────────────###
@@ -188,14 +160,20 @@ rsf_fit <- rsf; rm(rsf)
 load("./outputs/AKDERSF_Final.RData")
 akde_rsf_fit <- akde_rsf; rm(akde_rsf)
 
+## 4.5 · Population-level RSF (mean) ####
+# Meta-analysis mean across individual RSF fits; used to derive population-level coefficients.
+
+# mean_rsf <- mean(rsf_fit)
+# save(mean_rsf, file = "./outputs/Mean_Population_RSF_Final.RData")
+
+load("./outputs/Mean_Population_RSF_Final.RData")  # -> mean_rsf
+
 
 ###─────────────────────────────────────────────────────────────────────────###
 # SEC. 5 · SUMMARY TABLES ####
 ###─────────────────────────────────────────────────────────────────────────###
 
 ## 5.1 · Population-level RSF coefficients ####
-
-load("./outputs/Mean_Population_RSF_Final.RData")  # -> mean_rsf
 
 ci_raw <- as.data.frame(summary(mean_rsf)$CI)
 colnames(ci_raw)[1:3] <- c("low", "estimate", "high")
@@ -214,34 +192,40 @@ ci_df$term      <- pop_var_labels
 
 ## 5.2 · Individual-level RSF coefficients ####
 
-rsf_variables <- c("NDVI", "TreeCover", "Elevation", "Slope",
-                   "Ruggedness", "RoadProximity", "LandUse")
+# Maps ctmm's internal parameter names to readable labels
+var_labels <- c(
+  "LandUse.6_1 (1/LandUse.6_1)"    = "Ocean",
+  "LandUse.5_1 (1/LandUse.5_1)"    = "Fresh Water",
+  "LandUse.4_1 (1/LandUse.4_1)"    = "Urban Area",
+  "LandUse.3_1 (1/LandUse.3_1)"    = "Low Vegetation",
+  "LandUse.2_1 (1/LandUse.2_1)"    = "Lava Field",
+  "RoadProximity (1/RoadProximity)" = "Distance to Road",
+  "Ruggedness (1/Ruggedness)"       = "Ruggedness Index",
+  "Slope (1/Slope)"                 = "Slope Angle",
+  "Elevation (1/Elevation)"         = "Elevation",
+  "TreeCover (1/TreeCover)"         = "Tree Cover",
+  "NDVI (1/NDVI)"                   = "Vegetation Index (NDVI)"
+)
 
 result_ind <- do.call(rbind, lapply(rsf_fit, function(fit) {
   df <- as.data.frame(summary(fit)$CI)
-  df <- df[grep(paste(rsf_variables, collapse = "|"), rownames(df)), ]
-  tibble::rownames_to_column(df, var = "variable")
+  tibble::rownames_to_column(df[names(var_labels), ], var = "variable")
 }))
 result_ind$animal_id <- rep(names(x), each = 11)
-result_ind$variable  <- rsf_long$Variable
+result_ind$variable  <- unname(var_labels[result_ind$variable])
 
 ## 5.3 · Combined data frame (individuals + population) ####
 
 name_map <- c(
-  "Lava Field"     = "Land Type-Lava",
   "Ocean"          = "Land Type-Ocean",
+  "Fresh Water"    = "Land Type-Fresh Water",
   "Urban Area"     = "Land Type-Urban",
   "Low Vegetation" = "Land Type-Low vegetation",
-  "Slope angle"    = "Slope Angle",
-  "Fresh Water"    = "Land Type-Fresh Water",
-  "NDVI"           = "Vegetation Index (NDVI)"
+  "Lava Field"     = "Land Type-Lava"
 )
 
 result_ind <- result_ind |>
   dplyr::mutate(term = dplyr::recode(variable, !!!name_map, .default = variable))
-
-ci_df <- ci_df |>
-  dplyr::mutate(term = dplyr::recode(term, !!!name_map, .default = term))
 
 # CI caps prevent extreme individual estimates from distorting axis scales
 # (cap = population estimate ± 5 × population CI width)

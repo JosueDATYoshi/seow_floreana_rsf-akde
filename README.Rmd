@@ -62,7 +62,6 @@ Pre-computed model objects (`.RData`) are loaded directly to avoid re-running co
 | RSF fits (`rsf_fit`) | `outputs/RSF_Final.RData` |
 | RSF-informed AKDE (`akde_rsf_fit`) | `outputs/AKDERSF_Final.RData` |
 | Population-mean RSF (`mean_rsf`) | `outputs/Mean_Population_RSF_Final.RData` |
-| `outputs/RSF_results_final_long.xlsx` | Long-format table of harmonised RSF variable labels used in figures. |
 
 ---
 
