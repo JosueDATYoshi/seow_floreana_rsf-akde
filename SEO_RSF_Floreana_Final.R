@@ -27,7 +27,7 @@
 #
 # SEC. 6  Figures
 #   Fig. 1    3×3 RSF forest plot (individuals + population)
-#   Fig. 2    Panel A – Home range meta-analysis (ctmm::meta)
+#   Fig. 2    Panel A – Range distribution meta-analysis (ctmm::meta)
 #             Panel B – AKDE+RSF spatial map, scale bar, Galápagos inset
 #   S.Fig. 1  Population-level RSF forest plot (all variables, sorted)
 #   S.Fig. 2  Land use + road + AKDE overlap map
@@ -147,7 +147,7 @@ rsf_long <- read_excel("./outputs/RSF_results_final_long.xlsx", sheet = "Sheet1"
 
 ## 4.1 · Movement model selection (ctmm.select) ####
 # AICc-based selection across OUF, OU, IID, and anisotropic variants.
-# isotropic = TRUE constrains the home range to a circular covariance structure.
+# isotropic = TRUE constrains the range distribution to a circular covariance structure.
 
 # guess    <- lapply(x, ctmm.guess, CTMM = ctmm(isotropic = TRUE), interactive = FALSE)
 # ctmm_fit <- future_mapply(ctmm.select, x, guess, SIMPLIFY = FALSE, future.seed = TRUE)
@@ -380,7 +380,7 @@ ggsave("./outputs/figures/Fig1_RSF_3x3.tiff", fig1, width = 10, height = 10,
 
 
 ###─────────────────────────────────────────────────────────────────────────###
-## Fig. 2 · Home range meta-analysis (A) + AKDE+RSF spatial map (B) ####
+## Fig. 2 · Range distribution meta-analysis (A) + AKDE+RSF spatial map (B) ####
 ###─────────────────────────────────────────────────────────────────────────###
 
 # Individual colour palette (shared between Panels A and B)
@@ -465,8 +465,8 @@ fig2 <- cowplot::plot_grid(
 
 fig2
 
-ggsave("./outputs/figures/Fig2_HomeRange_Map.pdf",  fig2, width = 8, height = 14)
-ggsave("./outputs/figures/Fig2_HomeRange_Map.tiff", fig2, width = 8, height = 14,
+ggsave("./outputs/figures/Fig2_Range_Map.pdf",  fig2, width = 8, height = 14)
+ggsave("./outputs/figures/Fig2_Range_Map.tiff", fig2, width = 8, height = 14,
         dpi = 600, compression = "lzw")
 
 
