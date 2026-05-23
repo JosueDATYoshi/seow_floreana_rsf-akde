@@ -15,7 +15,7 @@ The analysis estimates which environmental features (vegetation, land use, topog
 
 ## Author
 
-Josue Arteaga-Torres — josue.arteaga.t@gmail.com
+Josue Arteaga-Torres —
 
 
 **AI disclaimer:** Code annotations and debugging were assisted by the Posit Assistant tool (v0.3.2) in RStudio 2026.04.0+526 "Globemaster Allium" (2026-04-18) for Windows.

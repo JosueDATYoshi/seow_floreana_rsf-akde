@@ -5,7 +5,7 @@
 # (Asio flammeus galapagoensis) using continuous-time movement modelling (ctmm).
 # Analysis covers 16 individuals tracked on Floreana Island.
 #
-# Josue Arteaga-Torres | josue.arteaga.t@gmail.com
+# Josue Arteaga-Torres 
 ###─────────────────────────────────────────────────────────────────────────###
 #
 # SCRIPT INDEX
